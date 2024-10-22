@@ -30,7 +30,7 @@ impl FromStr for ArcPath {
 #[derive(Parser)]
 pub(crate) struct Args {
     /// parallel jobs count
-    #[arg(short, long, default_value_t = 1)]
+    #[arg(short, long, default_value_t = 3)]
     pub(crate) jobs: usize,
 
     #[arg(short, long, default_value = "./out/")]

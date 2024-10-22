@@ -1,4 +1,4 @@
-use std::{os::unix::ffi::OsStrExt, path::PathBuf};
+use std::{borrow::Cow, os::unix::ffi::OsStrExt, path::PathBuf};
 
 use anyhow::{bail, Context, Result};
 
@@ -73,7 +73,27 @@ pub(crate) trait CommonUrlPatternDownloader: Sync + Send {
 #[async_trait::async_trait]
 impl<T: CommonUrlPatternDownloader> GetImageUrls for T {
     async fn get_image_urls(&self, gallery: &Uri) -> Result<Vec<Uri>> {
-        // TODO: handle gallery url that not ends wtih /
+        let mut gallery = Cow::Borrowed(gallery);
+        if !gallery.path().ends_with('/') {
+            use hyper::http::uri::PathAndQuery;
+            let mut parts = gallery.into_owned().into_parts();
+
+            let path_and_query = parts.path_and_query.unwrap();
+            let path = path_and_query.path();
+            let query = path_and_query.query();
+            let mut path_and_query = String::with_capacity(path.len() + 1);
+
+            path_and_query.push_str(path);
+            path_and_query.push('/');
+            if let Some(query) = query {
+                path_and_query.push('?');
+                path_and_query.push_str(query);
+            }
+
+            parts.path_and_query = Some(PathAndQuery::try_from(path_and_query)?);
+
+            gallery = Cow::Owned(Uri::from_parts(parts)?);
+        }
 
         let response = request(&gallery).await?;
         let code = response.status();
@@ -83,7 +103,7 @@ impl<T: CommonUrlPatternDownloader> GetImageUrls for T {
 
         let page = response.collect_response().await?;
 
-        let ctx = self.parse_ctx(gallery, &page).await?;
+        let ctx = self.parse_ctx(&gallery, &page).await?;
 
         ctx.get_urls()
     }
