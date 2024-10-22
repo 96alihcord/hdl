@@ -1,0 +1,31 @@
+[package]
+name        = "hdl"
+version     = "0.1.0"
+edition     = "2021"
+license     = "GPL"
+authors     = [ "alihcord <alihcord@cumallover.me>" ]
+description = "Manga downloader"
+repository  = "https://github.com/alihcord/hdl"
+
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+
+clap = { version = "4.5", features = ["derive"] }
+
+# http
+bytes = "1.7"
+http-body-util = "0.1"
+hyper = { version = "1.5", features = ["client", "http1"] }
+hyper-util = {version = "0.1", features = ["tokio"]}
+
+# html parsing
+tl = { version = "0.7", features = ["simd"] }
+regex = {version = "1", default-features = false, features = ["std", "perf", "perf-dfa-full", "unicode-perl"]}
+
+# progress bar
+indicatif = { version = "0.17", default-features = false }
+
+tokio = { version = "1.40", features = ["macros", "rt-multi-thread", "net", "io-util", "fs", "sync"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+webpki-roots = "0.26"
