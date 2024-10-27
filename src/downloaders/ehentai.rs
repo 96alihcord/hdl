@@ -38,7 +38,7 @@ impl Ehentai {
             gallery_selector: "div#gdt",
             gallery_link_selector: "a",
 
-            next_page_selector: &["div.gtb", "td", "a"],
+            next_page_selector: &["div.gtb", "table"],
 
             image_selector: "img#img",
         }
@@ -51,12 +51,25 @@ impl Ehentai {
 
     fn get_next_page_url(&self, dom: &VDom<'_>) -> Option<Uri> {
         let parser = dom.parser();
-        let href = dom
+
+        let table = dom
             .get_html_tag()
             .ok()?
             .query_selector_mutliple(parser, self.next_page_selector.iter())
+            .ok()?;
+
+        let last_td = table
+            .query_selector(parser, "td")
+            .and_then(|q| q.last())
+            .and_then(|node| node.get(parser))
+            .and_then(|node| node.as_tag())?;
+
+        let href = last_td
+            .query_selector(parser, "a")
+            .and_then(|mut q| q.next())
+            .and_then(|node| node.get(parser))
+            .and_then(|node| node.as_tag())
             .map(|tag| tag.attributes())
-            .ok()
             .and_then(|attrs| attrs.get("href"))??;
 
         Uri::try_from(href.as_bytes()).ok()
