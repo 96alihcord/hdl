@@ -1,13 +1,14 @@
-use std::{borrow::Cow, os::unix::ffi::OsStrExt, path::PathBuf};
+use std::{borrow::Cow, os::unix::ffi::OsStrExt, path::PathBuf, sync::Arc};
 
 use anyhow::{bail, Context, Result};
 
 use hyper::Uri;
 use tl::VDom;
+use tokio::sync::mpsc::Sender;
 
 use crate::{downloaders::GetImageUrls, request::request};
 
-use super::CollectResponse;
+use super::{CollectResponse, GetHtmlTag, TagWithParser};
 
 pub(crate) struct DownloadCtx {
     pages_count: usize,
@@ -42,12 +43,17 @@ impl DownloadCtx {
 pub(crate) trait CommonUrlPatternDownloader: Sync + Send {
     fn get_pages_count(&self, dom: &VDom<'_>) -> Result<usize>;
     fn get_first_image_url(&self, dom: &VDom<'_>) -> Result<Uri>;
+    fn get_title(&self, html: &TagWithParser<'_, '_>) -> Result<String>;
     async fn get_image_pattern_from_first_image_page(&self, first_image_page: &Uri) -> Result<Uri>;
 
-    async fn parse_ctx(&self, gallery_uri: &Uri, gallery_page: &[u8]) -> Result<DownloadCtx> {
+    async fn parse_ctx(
+        &self,
+        gallery_uri: &Uri,
+        gallery_page: &[u8],
+    ) -> Result<(String, DownloadCtx)> {
         let page = String::from_utf8_lossy(gallery_page);
 
-        let (pages_count, first_image) = {
+        let (title, pages_count, first_image) = {
             let dom = tl::parse(&page, Default::default())
                 .with_context(|| format!("failed to parse page for {gallery_uri:?}"))?;
 
@@ -55,25 +61,33 @@ pub(crate) trait CommonUrlPatternDownloader: Sync + Send {
 
             let first_image = self.get_first_image_url(&dom)?;
             let first_image = super::merge_uris(&first_image, gallery_uri);
+            let title = self.get_title(&dom.get_html_tag()?)?;
 
-            (pages_count, first_image)
+            (title, pages_count, first_image)
         };
 
         let img_url_pattern = self
             .get_image_pattern_from_first_image_page(&first_image)
             .await?;
 
-        Ok(DownloadCtx {
-            pages_count,
-            img_url_pattern,
-        })
+        Ok((
+            title,
+            DownloadCtx {
+                pages_count,
+                img_url_pattern,
+            },
+        ))
     }
 }
 
 #[async_trait::async_trait]
 impl<T: CommonUrlPatternDownloader> GetImageUrls for T {
-    async fn get_image_urls(&self, gallery: &Uri) -> Result<Vec<Uri>> {
-        let mut gallery = Cow::Borrowed(gallery);
+    async fn start_parser_task_result(
+        self: Arc<Self>,
+        tx: Sender<crate::downloaders::Msg>,
+        gallery: Arc<Uri>,
+    ) -> Result<()> {
+        let mut gallery = Cow::Borrowed(gallery.as_ref());
         if !gallery.path().ends_with('/') {
             use hyper::http::uri::PathAndQuery;
             let mut parts = gallery.into_owned().into_parts();
@@ -103,8 +117,13 @@ impl<T: CommonUrlPatternDownloader> GetImageUrls for T {
 
         let page = response.collect_response().await?;
 
-        let ctx = self.parse_ctx(&gallery, &page).await?;
+        use crate::downloaders::Msg;
 
-        ctx.get_urls()
+        let (title, ctx) = self.parse_ctx(&gallery, &page).await?;
+
+        tx.send(Msg::Title(title)).await?;
+        tx.send(Msg::Images(ctx.get_urls()?)).await?;
+
+        Ok(())
     }
 }

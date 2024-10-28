@@ -5,8 +5,8 @@ use tl::VDom;
 
 use crate::request::request;
 
-use super::utils::CollectResponse;
 use super::utils::{self, common_url_pattern_donwloader::CommonUrlPatternDownloader};
+use super::utils::{CollectResponse, TagWithParser};
 use super::Downloader;
 
 pub struct Nhentai {
@@ -14,6 +14,8 @@ pub struct Nhentai {
     authority: &'static str,
 
     path_re: Regex,
+
+    title_selector: &'static [&'static str],
 
     info_selector: &'static str,
     info_field_selector: &'static str,
@@ -33,6 +35,8 @@ impl Nhentai {
             authority: "nhentai.net",
 
             path_re: Regex::new(r"^/g/(?P<gallery_id>\d+)/?$").unwrap(),
+
+            title_selector: &["div#info", "h1.title"],
 
             info_selector: "section#tags",
             info_field_selector: "div.field-name",
@@ -91,11 +95,11 @@ impl CommonUrlPatternDownloader for Nhentai {
             .map(|node| node.inner_html(parser))
             .with_context(|| format!("selctor not found: {}", self.info_selector))?;
 
-
         let pages_info_dom = tl::parse(&pages_info, Default::default())?;
         let parser = pages_info_dom.parser();
 
-        let pages = pages_info_dom.query_selector(self.info_pages_selector)
+        let pages = pages_info_dom
+            .query_selector(self.info_pages_selector)
             .and_then(|mut q| q.next())
             .and_then(|node| node.get(parser))
             .map(|node| node.inner_text(parser))
@@ -113,11 +117,11 @@ impl CommonUrlPatternDownloader for Nhentai {
             .map(|node| node.inner_html(parser))
             .with_context(|| format!("selctor not found: {}", self.gallery_selector))?;
 
-
         let gallery_dom = tl::parse(&gallery, Default::default())?;
         let parser = gallery_dom.parser();
 
-        let img_url = gallery_dom.query_selector(self.gallery_img_selector)
+        let img_url = gallery_dom
+            .query_selector(self.gallery_img_selector)
             .and_then(|mut q| q.next())
             .and_then(|node| node.get(parser))
             .and_then(|node| node.as_tag())
@@ -125,7 +129,6 @@ impl CommonUrlPatternDownloader for Nhentai {
             .and_then(|attrs| attrs.get("href"))
             .context("no 'href' attribute")?
             .context("empty 'href' attribute")?;
-
 
         Ok(Uri::try_from(img_url.as_bytes())?)
     }
@@ -137,7 +140,8 @@ impl CommonUrlPatternDownloader for Nhentai {
         let dom = tl::parse(&page, Default::default())?;
         let parser = dom.parser();
 
-        let section = dom.query_selector(self.img_section_selector)
+        let section = dom
+            .query_selector(self.img_section_selector)
             .and_then(|mut q| q.next())
             .and_then(|node| node.get(parser))
             .map(|node| node.inner_html(parser))
@@ -146,7 +150,8 @@ impl CommonUrlPatternDownloader for Nhentai {
         let section_dom = tl::parse(&section, Default::default())?;
         let parser = section_dom.parser();
 
-        let url = section_dom.query_selector(self.img_section_img_selector)
+        let url = section_dom
+            .query_selector(self.img_section_img_selector)
             .and_then(|mut q| q.next())
             .and_then(|node| node.get(parser))
             .and_then(|node| node.as_tag())
@@ -156,6 +161,10 @@ impl CommonUrlPatternDownloader for Nhentai {
             .context("empty 'src' attribute")?;
 
         Ok(Uri::try_from(url.as_bytes())?)
+    }
 
+    fn get_title(&self, html: &TagWithParser<'_, '_>) -> Result<String> {
+        let title = html.query_selector_mutliple(self.title_selector.iter())?;
+        Ok(title.tag.inner_text(title.parser).to_string())
     }
 }

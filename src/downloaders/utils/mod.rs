@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use tl::{HTMLTag, Parser, VDom};
+use tl::{queryselector::QuerySelectorIterator, HTMLTag, Parser, VDom};
 
 pub(crate) mod common_url_pattern_donwloader;
 
@@ -55,18 +55,47 @@ impl CollectResponse for hyper::Response<hyper::body::Incoming> {
     }
 }
 
+pub struct TagWithParser<'a, 'b> {
+    pub tag: &'b HTMLTag<'a>,
+    pub parser: &'b Parser<'a>,
+}
+
+impl<'a, 'b> TagWithParser<'a, 'b> {
+    pub fn query_selector_mutliple<S, I>(&self, selectors: I) -> Result<TagWithParser<'a, 'b>>
+    where
+        S: AsRef<str> + 'b,
+        I: Iterator<Item = S>,
+    {
+        let parser = self.parser;
+        let tag = self.tag.query_selector_mutliple(parser, selectors)?;
+
+        Ok(Self { tag, parser })
+    }
+
+    pub fn query_selector(
+        &self,
+        selector: &'b str,
+    ) -> Option<QuerySelectorIterator<'a, 'b, HTMLTag<'a>>> {
+        self.tag.query_selector(self.parser, selector)
+    }
+}
+
 pub trait GetHtmlTag<'a> {
-    fn get_html_tag<'b>(&'b self) -> Result<&'b HTMLTag<'a>>;
+    /// get <html> tag
+    fn get_html_tag<'b>(&'b self) -> Result<TagWithParser<'a, 'b>>;
 }
 
 impl<'a> GetHtmlTag<'a> for VDom<'a> {
-    fn get_html_tag<'b>(&'b self) -> Result<&'b HTMLTag<'a>> {
+    fn get_html_tag<'b>(&'b self) -> Result<TagWithParser<'a, 'b>> {
         let parser = self.parser();
-        self.query_selector("html")
+        let tag = self
+            .query_selector("html")
             .and_then(|mut q| q.next())
             .and_then(|node| node.get(parser))
             .and_then(|node| node.as_tag())
-            .context("failed to get html tag from dom")
+            .context("failed to get html tag from dom")?;
+
+        Ok(TagWithParser { tag, parser })
     }
 }
 
@@ -106,34 +135,3 @@ impl<'a> QuerySelectorMutliple<'a> for HTMLTag<'a> {
         })
     }
 }
-
-//
-//
-//pub type QueryMap<'a> = HashMap<Cow<'a, str>, Cow<'a, str>>;
-//
-//pub fn query_hash_map_to_str(map: &QueryMap<'_>) -> String {
-//    let mut query = String::new();
-//
-//    let len = map.len();
-//    for (i, (key, value)) in map.iter().enumerate() {
-//        query.push_str(key);
-//        query.push('=');
-//        query.push_str(value);
-//        if i != len - 1 {
-//            query.push('&');
-//        }
-//    }
-//
-//    query
-//}
-//
-//pub fn get_query_hash_map<'a>(uri: &'a hyper::Uri) -> Option<QueryMap<'a>> {
-//    let mut map = QueryMap::new();
-//
-//    for param in uri.query()?.split('&') {
-//        let (key, value) = param.split_once('=')?;
-//        map.insert(Cow::Borrowed(key), Cow::Borrowed(value));
-//    }
-//
-//    Some(map)
-//}

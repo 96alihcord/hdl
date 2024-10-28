@@ -1,29 +1,44 @@
-use clap::Parser;
 use std::convert::Infallible;
-use std::sync::Arc;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::sync::Arc;
 
+use clap::Parser;
+use hyper::Uri;
 
-pub struct ArcPath(Arc<Path>);
+pub struct ArcWrap<T: ?Sized>(Arc<T>);
 
-impl Clone for ArcPath {
+impl<T: ?Sized> Clone for ArcWrap<T> {
     fn clone(&self) -> Self {
-        ArcPath(Arc::clone(&self.0))
+        Self(Arc::clone(&self.0))
     }
 }
 
-impl Into<Arc<Path>> for ArcPath {
-    fn into(self) -> Arc<Path> {
-        self.0
+impl<T: ?Sized> AsRef<T> for ArcWrap<T> {
+    fn as_ref(&self) -> &T {
+        self.0.as_ref()
     }
 }
 
-impl FromStr for ArcPath {
+impl<T: ?Sized> ArcWrap<T> {
+    pub fn inner(&self) -> Arc<T> {
+        Arc::clone(&self.0)
+    }
+}
+
+impl FromStr for ArcWrap<Path> {
     type Err = Infallible;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(ArcPath(Arc::from(PathBuf::from(s))))
+        Ok(Self(Arc::from(PathBuf::from(s))))
+    }
+}
+
+impl FromStr for ArcWrap<Uri> {
+    type Err = hyper::http::uri::InvalidUri;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(Arc::from(Uri::try_from(s)?)))
     }
 }
 
@@ -34,7 +49,7 @@ pub(crate) struct Args {
     pub(crate) jobs: usize,
 
     #[arg(short, long, default_value = "./out/")]
-    pub(crate) out_dir: ArcPath,
+    pub(crate) out_dir: ArcWrap<Path>,
 
-    pub(crate) url: hyper::Uri,
+    pub(crate) url: ArcWrap<Uri>,
 }

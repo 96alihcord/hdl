@@ -9,7 +9,7 @@ use crate::{downloaders::Downloader, request::request};
 use crate::downloaders::utils;
 
 use super::utils::common_url_pattern_donwloader::CommonUrlPatternDownloader;
-use super::utils::CollectResponse;
+use super::utils::{CollectResponse, TagWithParser};
 
 pub struct Imhentai {
     name: &'static str,
@@ -17,6 +17,7 @@ pub struct Imhentai {
     path_re: Regex,
     pages_re: Regex,
     pages_selector: &'static str,
+    title_selector: &'static [&'static str],
     gallery_selector: &'static str,
     full_image_url_attr: &'static str,
     full_image_selector: &'static str,
@@ -30,6 +31,8 @@ impl Imhentai {
             path_re: Regex::new(r"^/gallery/(?P<gallery_id>\d+)/?$").unwrap(),
             pages_selector: "li.pages",
             pages_re: Regex::new(r"Pages:\s+(?P<pages>\d+)").unwrap(),
+
+            title_selector: &["div.right_details", "h1"],
 
             gallery_selector: "div#append_thumbs",
 
@@ -72,6 +75,11 @@ impl CommonUrlPatternDownloader for Imhentai {
                     .context("failed to parse number")?)
             })
             .context("failed to get pages count")?
+    }
+
+    fn get_title(&self, html: &TagWithParser<'_, '_>) -> Result<String> {
+        let title = html.query_selector_mutliple(self.title_selector.iter())?;
+        Ok(title.tag.inner_text(title.parser).to_string())
     }
 
     fn get_first_image_url(&self, dom: &VDom<'_>) -> Result<Uri> {

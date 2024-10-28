@@ -1,9 +1,6 @@
-//#![deny(warnings)]
-#![warn(rust_2018_idioms)]
-
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::path::Path;
 
 use clap::Parser;
 use http_body_util::BodyExt;
@@ -25,58 +22,94 @@ use progress::progress_bar;
 mod args;
 use args::Args;
 
+const MAX_FILE_NAME_LEN: usize = 255;
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
 
-    let url = &args.url;
-
-    let out_dir = args.out_dir.clone().into();
-    fs::create_dir_all(&out_dir).await?;
+    let url = args.url.as_ref();
 
     for extractor in downloaders().iter() {
-        let extractor = Arc::clone(extractor);
         if !extractor.is_gallery_match(&url) {
             continue;
         }
 
-        return start_download(extractor, out_dir, &args).await;
+        return start_download(Arc::clone(extractor), &args).await;
     }
 
     bail!(format!("downloader not found for: {:?}", url))
 }
 
-async fn start_download(
-    downloader: Arc<dyn Downloader>,
-    out_dir: Arc<Path>,
-    args: &Args,
-) -> Result<()> {
+async fn start_download(downloader: Arc<dyn Downloader>, args: &Args) -> Result<()> {
+    const BUFF_SZ: usize = 1024;
     let semaphore = Arc::new(Semaphore::new(args.jobs));
 
-    let urls = downloader.get_image_urls(&args.url).await?;
-    let tasks_count = urls.len();
+    let (downloader_tx, mut downloader_rx) = mpsc::channel::<downloaders::Msg>(BUFF_SZ);
 
-    let (tx, rx) = mpsc::channel::<progress::Msg>(args.jobs * 2);
+    let (progress_tx, progress_rx) = mpsc::channel::<progress::Msg>(BUFF_SZ);
 
     let mut set = JoinSet::<Result<()>>::new();
 
+    let name = downloader.name();
     let progress: JoinHandle<Result<()>> = tokio::spawn(async move {
-        progress_bar(rx, tasks_count.try_into()?).await?;
+        progress_bar(progress_rx, name).await?;
         Ok(())
     });
 
-    for (id, img) in urls.into_iter().enumerate() {
-        let permit = semaphore.clone().acquire_owned().await?;
-
-        let tx = tx.clone();
+    let parser_task = {
         let downloader = Arc::clone(&downloader);
-        let out_dir = Arc::clone(&out_dir);
+        let url = args.url.inner();
 
-        set.spawn(async move {
-            download_image(downloader, out_dir, tx, id, &img).await?;
-            drop(permit);
-            Ok(())
-        });
+        tokio::spawn(async move {
+            downloader.start_parser_task(downloader_tx, url).await;
+        })
+    };
+
+    let mut id: usize = 0;
+    let mut manga_dir = None;
+
+    while let Some(msg) = downloader_rx.recv().await {
+        use downloaders::Msg;
+        match msg {
+            Msg::Title(title) => {
+                let title = title
+                    .replace('/', "_")
+                    .chars()
+                    .take(MAX_FILE_NAME_LEN)
+                    .collect::<String>();
+                let dir = args.out_dir.as_ref().join(title);
+                fs::create_dir_all(&dir).await?;
+                manga_dir = Some(Arc::from(dir));
+            }
+            Msg::Images(urls) => {
+                let len = urls.len().try_into()?;
+                progress_tx.send(progress::Msg::IncLen(len)).await?;
+
+                let out_dir = manga_dir
+                    .as_ref()
+                    .expect("name message should be already received");
+
+                for img in urls {
+                    let permit = semaphore.clone().acquire_owned().await?;
+
+                    let tx = progress_tx.clone();
+                    let downloader = Arc::clone(&downloader);
+                    let out_dir = Arc::clone(&out_dir);
+
+                    set.spawn(async move {
+                        download_image(downloader, out_dir, tx, id, &img).await?;
+                        drop(permit);
+                        Ok(())
+                    });
+
+                    id += 1;
+                }
+            }
+            Msg::Error(e) => {
+                eprintln!("error happend: {e}");
+            }
+        }
     }
 
     while let Some(res) = set.join_next().await {
@@ -84,9 +117,9 @@ async fn start_download(
             .context("async task failed")?;
     }
 
-    tx.send(progress::Msg::Quit).await?;
+    parser_task.await?;
+    progress_tx.send(progress::Msg::Quit).await?;
     progress.await??;
-    println!();
 
     Ok(())
 }
@@ -107,14 +140,12 @@ async fn download_image(
     .await?;
     let url = &downloader.resolve_image_url(&url).await?;
 
-    // TODO: use gallery name as subdir
     let out_dir = out_dir.as_ref();
     let path = PathBuf::from(url.path());
 
     let file_name = path.file_name().context("missing file name")?;
     // TODO: use image number as file name
     let file_path = out_dir.join(&file_name);
-
 
     tx.send(Msg::Update(Update {
         id,

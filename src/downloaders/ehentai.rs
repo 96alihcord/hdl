@@ -1,15 +1,15 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, sync::Arc};
 
 use anyhow::{Context, Result};
 use hyper::Uri;
 use regex::Regex;
-use tl::VDom;
+use tokio::sync::{mpsc::Sender, OnceCell};
 
 use crate::{downloaders::Downloader, request::request};
 
 use super::{
-    utils::{self, CollectResponse, GetHtmlTag, QuerySelectorMutliple},
-    GetImageUrls,
+    utils::{self, CollectResponse, GetHtmlTag, TagWithParser},
+    GetImageUrls, Msg,
 };
 
 pub struct Ehentai {
@@ -22,6 +22,7 @@ pub struct Ehentai {
     gallery_link_selector: &'static str,
 
     next_page_selector: &'static [&'static str],
+    title_selector: &'static [&'static str],
 
     image_selector: &'static str,
 }
@@ -39,6 +40,7 @@ impl Ehentai {
             gallery_link_selector: "a",
 
             next_page_selector: &["div.gtb", "table"],
+            title_selector: &["div.gm", "h1#gn"],
 
             image_selector: "img#img",
         }
@@ -49,25 +51,21 @@ impl Ehentai {
         self.path_re.is_match(uri.path())
     }
 
-    fn get_next_page_url(&self, dom: &VDom<'_>) -> Option<Uri> {
-        let parser = dom.parser();
-
-        let table = dom
-            .get_html_tag()
-            .ok()?
-            .query_selector_mutliple(parser, self.next_page_selector.iter())
+    fn get_next_page_url(&self, html: &TagWithParser<'_, '_>) -> Option<Uri> {
+        let table = html
+            .query_selector_mutliple(self.next_page_selector.iter())
             .ok()?;
 
         let last_td = table
-            .query_selector(parser, "td")
+            .query_selector("td")
             .and_then(|q| q.last())
-            .and_then(|node| node.get(parser))
+            .and_then(|node| node.get(html.parser))
             .and_then(|node| node.as_tag())?;
 
         let href = last_td
-            .query_selector(parser, "a")
+            .query_selector(html.parser, "a")
             .and_then(|mut q| q.next())
-            .and_then(|node| node.get(parser))
+            .and_then(|node| node.get(html.parser))
             .and_then(|node| node.as_tag())
             .map(|tag| tag.attributes())
             .and_then(|attrs| attrs.get("href"))??;
@@ -75,31 +73,39 @@ impl Ehentai {
         Uri::try_from(href.as_bytes()).ok()
     }
 
-    // TODO: make downloader return pages in junks so it can start downloading images earlier
-    /// returns: (urls, next page url)
-    async fn get_page_img_urls(&self, page_url: &Uri) -> Result<(Vec<Uri>, Option<Uri>)> {
+    fn get_title<'a, 'b>(&self, html: &TagWithParser<'a, 'b>) -> Result<String> {
+        let name = html
+            .query_selector_mutliple(self.title_selector.iter())?
+            .tag
+            .inner_text(html.parser);
+        Ok(name.to_string())
+    }
+
+    /// returns: (title, urls, next page url)
+    async fn get_page_img_urls(
+        &self,
+        need_name: bool,
+        page_url: &Uri,
+    ) -> Result<(Option<String>, Vec<Uri>, Option<Uri>)> {
         let page = request(page_url).await?.collect_response().await?;
         let page = String::from_utf8_lossy(&page);
 
         let dom = tl::parse(&page, Default::default())?;
-        let parser = dom.parser();
+        let html = &dom.get_html_tag()?;
 
-        let gallery = dom
+        let gallery = html
             .query_selector(self.gallery_selector)
             .and_then(|mut q| q.next())
-            .and_then(|node| node.get(parser))
-            .map(|node| node.inner_html(parser))
+            .and_then(|node| node.get(html.parser))
+            .and_then(|node| node.as_tag())
             .with_context(|| format!("selector not found: {}", self.gallery_selector))?;
 
-        let gallery_dom = tl::parse(&gallery, Default::default())?;
-        let parser = gallery_dom.parser();
-
-        let urls = gallery_dom
-            .query_selector(self.gallery_link_selector)
+        let urls = gallery
+            .query_selector(html.parser, self.gallery_link_selector)
             .map(|q| {
                 q.map(|node| -> Result<_> {
                     let href = node
-                        .get(parser)
+                        .get(html.parser)
                         .and_then(|node| node.as_tag())
                         .map(|tag| tag.attributes())
                         .map(|attrs| attrs.get("href"))
@@ -114,8 +120,13 @@ impl Ehentai {
             .with_context(|| format!("failed to query selector: {}", self.gallery_link_selector))?
             .collect::<Result<Vec<_>>>()?;
 
-        let next = self.get_next_page_url(&dom);
-        Ok((urls, next))
+        let next = self.get_next_page_url(html);
+        let name = if need_name {
+            Some(self.get_title(html)?)
+        } else {
+            None
+        };
+        Ok((name, urls, next))
     }
 }
 
@@ -156,13 +167,25 @@ impl Downloader for Ehentai {
 
 #[async_trait::async_trait]
 impl GetImageUrls for Ehentai {
-    async fn get_image_urls(&self, gallery: &Uri) -> Result<Vec<Uri>> {
-        let mut urls = Vec::new();
-        let mut page_url = Cow::Borrowed(gallery);
+    async fn start_parser_task_result(
+        self: Arc<Self>,
+        tx: Sender<Msg>,
+        gallery: Arc<Uri>,
+    ) -> Result<()> {
+        let mut page_url = Cow::Borrowed(gallery.as_ref());
 
+        let once = OnceCell::new();
         loop {
-            let (page_urls, next) = self.get_page_img_urls(&page_url).await?;
-            urls.extend(page_urls);
+            let need_name = !once.initialized();
+            let (title, page_urls, next) = self.get_page_img_urls(need_name, &page_url).await?;
+
+            once.get_or_try_init(|| async {
+                let title = title.expect("no title parsed");
+                tx.send(Msg::Title(title)).await
+            })
+            .await?;
+
+            tx.send(Msg::Images(page_urls)).await?;
 
             if let Some(next) = next {
                 page_url = Cow::Owned(next);
@@ -171,6 +194,6 @@ impl GetImageUrls for Ehentai {
             }
         }
 
-        Ok(urls)
+        Ok(())
     }
 }

@@ -3,10 +3,9 @@ use std::{collections::HashMap, ffi::OsString};
 use tokio::sync::mpsc;
 
 use anyhow::{Context, Result};
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 
-#[derive(Clone)]
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Status {
     Starting(OsString),
     ResolvingUrl,
@@ -14,8 +13,7 @@ pub enum Status {
     Done,
 }
 
-#[derive(Debug)]
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Update {
     pub id: usize,
     pub status: Status,
@@ -24,18 +22,29 @@ pub struct Update {
 #[derive(Debug)]
 pub enum Msg {
     Update(Update),
+    IncLen(u64),
     Quit,
 }
 
-pub async fn progress_bar(mut rx: mpsc::Receiver<Msg>, len: u64) -> Result<()> {
+pub async fn progress_bar(mut rx: mpsc::Receiver<Msg>, name: &'static str) -> Result<()> {
     let progress = MultiProgress::new();
-    let main_progress = progress.add(ProgressBar::new(len));
-    main_progress.tick();
+    let main_progress = progress.add({
+        let style = ProgressStyle::with_template("{msg}: {wide_bar} {pos}/{len}")?;
+        ProgressBar::with_draw_target(None, ProgressDrawTarget::stderr())
+            .with_style(style)
+            .with_message(name)
+    });
 
     let mut bars = HashMap::<usize, ProgressBar>::new();
 
     while let Some(msg) = rx.recv().await {
         match msg {
+            Msg::IncLen(len) => {
+                if main_progress.length().is_none() {
+                    main_progress.set_length(0);
+                }
+                main_progress.inc_length(len);
+            }
             Msg::Update(Update { id, status }) => match status {
                 Status::ResolvingUrl => {
                     let style =
@@ -45,7 +54,6 @@ pub async fn progress_bar(mut rx: mpsc::Receiver<Msg>, len: u64) -> Result<()> {
                         .with_message("Resolving Image Url");
 
                     bars.insert(id, progress.add(bar));
-
                 }
                 Status::Starting(name) => {
                     let bar = bars
@@ -53,7 +61,6 @@ pub async fn progress_bar(mut rx: mpsc::Receiver<Msg>, len: u64) -> Result<()> {
                         .with_context(|| format!("failed to get bar with id={id}"))?;
                     bar.set_prefix(format!("{name:?}"));
                     bar.set_message("Starting");
-
                 }
                 Status::Downloading => {
                     let bar = bars
@@ -73,7 +80,7 @@ pub async fn progress_bar(mut rx: mpsc::Receiver<Msg>, len: u64) -> Result<()> {
             Msg::Quit => {
                 progress.clear()?;
                 break;
-            },
+            }
         }
     }
 

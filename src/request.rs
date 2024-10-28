@@ -80,7 +80,7 @@ pub async fn request(url: &hyper::Uri) -> Result<Response<hyper::body::Incoming>
     let (mut sender, conn) = hyper::client::conn::http1::handshake(io).await?;
     tokio::task::spawn(async move {
         if let Err(err) = conn.await {
-            println!("Connection failed: {:?}", err);
+            eprintln!("Connection failed: {:?}", err);
         }
     });
 

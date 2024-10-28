@@ -1,7 +1,11 @@
-use std::{borrow::Cow, sync::{Arc, OnceLock}};
+use std::{
+    borrow::Cow,
+    sync::{Arc, OnceLock},
+};
 
 use anyhow::Result;
 use hyper::Uri;
+use tokio::sync::mpsc::Sender;
 
 mod imhentai;
 use imhentai::Imhentai;
@@ -14,9 +18,26 @@ use nhentai::Nhentai;
 
 pub mod utils;
 
+pub enum Msg {
+    Title(String),
+    Images(Vec<Uri>),
+    Error(anyhow::Error),
+}
+
 #[async_trait::async_trait]
 pub trait GetImageUrls: Sync + Send {
-    async fn get_image_urls(&self, gallery: &Uri) -> Result<Vec<Uri>>;
+    // TODO: do it somehow properly
+    async fn start_parser_task_result(
+        self: Arc<Self>,
+        tx: Sender<Msg>,
+        gallery: Arc<Uri>,
+    ) -> Result<()>;
+    async fn start_parser_task(self: Arc<Self>, tx: Sender<Msg>, gallery: Arc<Uri>) {
+        match self.start_parser_task_result(tx.clone(), gallery).await {
+            Err(e) => tx.send(Msg::Error(e)).await.expect("failed to send"),
+            Ok(()) => return,
+        }
+    }
 }
 
 #[async_trait::async_trait]
