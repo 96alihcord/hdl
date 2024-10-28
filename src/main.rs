@@ -107,7 +107,7 @@ async fn start_download(downloader: Arc<dyn Downloader>, args: &Args) -> Result<
                 }
             }
             Msg::Error(e) => {
-                eprintln!("error happend: {e}");
+                Err(e).context("error happend in downloader task")?;
             }
         }
     }

@@ -3,7 +3,6 @@ use std::{borrow::Cow, os::unix::ffi::OsStrExt, path::PathBuf, sync::Arc};
 use anyhow::{bail, Context, Result};
 
 use hyper::Uri;
-use tl::VDom;
 use tokio::sync::mpsc::Sender;
 
 use crate::{downloaders::GetImageUrls, request::request};
@@ -39,11 +38,15 @@ impl DownloadCtx {
     }
 }
 
+pub struct GalleryInfo {
+    pub pages_count: usize,
+    pub title: String,
+}
+
 #[async_trait::async_trait]
 pub(crate) trait CommonUrlPatternDownloader: Sync + Send {
-    fn get_pages_count(&self, dom: &VDom<'_>) -> Result<usize>;
-    fn get_first_image_url(&self, dom: &VDom<'_>) -> Result<Uri>;
-    fn get_title(&self, html: &TagWithParser<'_, '_>) -> Result<String>;
+    fn get_first_image_url(&self, html: &TagWithParser<'_, '_>) -> Result<Uri>;
+    fn get_info(&self, info_tag: &TagWithParser<'_, '_>) -> Result<GalleryInfo>;
     async fn get_image_pattern_from_first_image_page(&self, first_image_page: &Uri) -> Result<Uri>;
 
     async fn parse_ctx(
@@ -57,13 +60,14 @@ pub(crate) trait CommonUrlPatternDownloader: Sync + Send {
             let dom = tl::parse(&page, Default::default())
                 .with_context(|| format!("failed to parse page for {gallery_uri:?}"))?;
 
-            let pages_count = self.get_pages_count(&dom)?;
+            let html = &dom.get_html_tag()?;
 
-            let first_image = self.get_first_image_url(&dom)?;
+            let info = self.get_info(html)?;
+
+            let first_image = self.get_first_image_url(html)?;
             let first_image = super::merge_uris(&first_image, gallery_uri);
-            let title = self.get_title(&dom.get_html_tag()?)?;
 
-            (title, pages_count, first_image)
+            (info.title, info.pages_count, first_image)
         };
 
         let img_url_pattern = self

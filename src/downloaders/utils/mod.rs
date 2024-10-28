@@ -72,6 +72,7 @@ impl<'a, 'b> TagWithParser<'a, 'b> {
         Ok(Self { tag, parser })
     }
 
+    // TODO: accept also closure to transform QuerySelectorIterator into HTMLTag
     pub fn query_selector(
         &self,
         selector: &'b str,
