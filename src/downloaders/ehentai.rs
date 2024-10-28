@@ -9,7 +9,7 @@ use crate::{downloaders::Downloader, request::request};
 
 use super::{
     utils::{self, CollectResponse, GetHtmlTag, TagWithParser},
-    GetImageUrls, Msg,
+    Msg, ParserTask,
 };
 
 pub struct Ehentai {
@@ -166,8 +166,8 @@ impl Downloader for Ehentai {
 }
 
 #[async_trait::async_trait]
-impl GetImageUrls for Ehentai {
-    async fn start_parser_task_result(
+impl ParserTask for Ehentai {
+    async fn try_start_parser_task(
         self: Arc<Self>,
         tx: Sender<Msg>,
         gallery: Arc<Uri>,

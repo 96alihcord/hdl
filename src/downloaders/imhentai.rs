@@ -106,9 +106,7 @@ impl CommonUrlPatternDownloader for Imhentai {
         let dom = tl::parse(&page, Default::default()).context("failed to parse html")?;
         let html = &dom.get_html_tag()?;
 
-        let img_tag = html
-            .query_selector_mutliple(self.full_image_selector.iter())?;
-
+        let img_tag = html.query_selector_mutliple(self.full_image_selector.iter())?;
 
         let attr = self.img_url_attr;
         let img = img_tag

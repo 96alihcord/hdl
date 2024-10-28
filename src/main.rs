@@ -45,7 +45,7 @@ async fn start_download(downloader: Arc<dyn Downloader>, args: &Args) -> Result<
     const BUFF_SZ: usize = 1024;
     let semaphore = Arc::new(Semaphore::new(args.jobs));
 
-    let (downloader_tx, mut downloader_rx) = mpsc::channel::<downloaders::Msg>(BUFF_SZ);
+    let (parser_tx, mut parser_rx) = mpsc::channel::<downloaders::Msg>(BUFF_SZ);
 
     let (progress_tx, progress_rx) = mpsc::channel::<progress::Msg>(BUFF_SZ);
 
@@ -62,14 +62,14 @@ async fn start_download(downloader: Arc<dyn Downloader>, args: &Args) -> Result<
         let url = args.url.inner();
 
         tokio::spawn(async move {
-            downloader.start_parser_task(downloader_tx, url).await;
+            downloader.start_parser_task(parser_tx, url).await;
         })
     };
 
     let mut id: usize = 0;
     let mut manga_dir = None;
 
-    while let Some(msg) = downloader_rx.recv().await {
+    while let Some(msg) = parser_rx.recv().await {
         use downloaders::Msg;
         match msg {
             Msg::Title(title) => {

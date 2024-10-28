@@ -25,28 +25,30 @@ pub enum Msg {
 }
 
 #[async_trait::async_trait]
-pub trait GetImageUrls: Sync + Send {
-    // TODO: do it somehow properly
-    async fn start_parser_task_result(
+pub(crate) trait ParserTask: Sync + Send {
+    async fn try_start_parser_task(
         self: Arc<Self>,
         tx: Sender<Msg>,
         gallery: Arc<Uri>,
     ) -> Result<()>;
-    async fn start_parser_task(self: Arc<Self>, tx: Sender<Msg>, gallery: Arc<Uri>) {
-        match self.start_parser_task_result(tx.clone(), gallery).await {
-            Err(e) => tx.send(Msg::Error(e)).await.expect("failed to send"),
-            Ok(()) => return,
-        }
-    }
 }
 
 #[async_trait::async_trait]
-pub trait Downloader: Sync + Send + GetImageUrls {
+pub trait Downloader: Sync + Send + ParserTask {
     fn name(&self) -> &'static str;
     fn is_gallery_match(&self, gallery: &Uri) -> bool;
 
     async fn resolve_image_url<'a>(&self, url: &'a Uri) -> Result<Cow<'a, Uri>> {
         Ok(Cow::Borrowed(url))
+    }
+}
+
+impl dyn Downloader {
+    pub async fn start_parser_task(self: Arc<Self>, tx: Sender<Msg>, gallery: Arc<Uri>) {
+        match self.try_start_parser_task(tx.clone(), gallery).await {
+            Err(e) => tx.send(Msg::Error(e)).await.expect("failed to send"),
+            Ok(()) => return,
+        }
     }
 }
 

@@ -5,7 +5,7 @@ use anyhow::{bail, Context, Result};
 use hyper::Uri;
 use tokio::sync::mpsc::Sender;
 
-use crate::{downloaders::GetImageUrls, request::request};
+use crate::{downloaders::ParserTask, request::request};
 
 use super::{CollectResponse, GetHtmlTag, TagWithParser};
 
@@ -85,8 +85,8 @@ pub(crate) trait CommonUrlPatternDownloader: Sync + Send {
 }
 
 #[async_trait::async_trait]
-impl<T: CommonUrlPatternDownloader> GetImageUrls for T {
-    async fn start_parser_task_result(
+impl<T: CommonUrlPatternDownloader> ParserTask for T {
+    async fn try_start_parser_task(
         self: Arc<Self>,
         tx: Sender<crate::downloaders::Msg>,
         gallery: Arc<Uri>,
