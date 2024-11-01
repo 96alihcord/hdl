@@ -27,7 +27,7 @@ static TLS_CONFIG: OnceLock<Arc<rustls::ClientConfig>> = OnceLock::new();
 fn tls_config() -> Arc<rustls::ClientConfig> {
     TLS_CONFIG
         .get_or_init(|| {
-            let _ = rustls::crypto::ring::default_provider()
+            rustls::crypto::ring::default_provider()
                 .install_default()
                 .expect("failed to instal default crypto provider");
 
@@ -42,22 +42,22 @@ fn tls_config() -> Arc<rustls::ClientConfig> {
 
 pub async fn request(url: &hyper::Uri) -> Result<Response<hyper::body::Incoming>> {
     enum Protocol {
-        HTTP,
-        HTTPS,
+        Http,
+        Https,
     }
 
     let protocol = match url.scheme_str() {
-        Some("http") => Protocol::HTTP,
-        Some("https") => Protocol::HTTPS,
+        Some("http") => Protocol::Http,
+        Some("https") => Protocol::Https,
 
         Some(protocol) => bail!("invalid protocol: {protocol}"),
         None => bail!("no protocol"),
     };
 
     let host = url.host().context("no host in url")?.to_owned();
-    let port = url.port_u16().unwrap_or_else(|| match protocol {
-        Protocol::HTTP => 80,
-        Protocol::HTTPS => 443,
+    let port = url.port_u16().unwrap_or(match protocol {
+        Protocol::Http => 80,
+        Protocol::Https => 443,
     });
     let addr = format!("{host}:{port}");
 
@@ -66,13 +66,13 @@ pub async fn request(url: &hyper::Uri) -> Result<Response<hyper::body::Incoming>
         .with_context(|| format!("failed to connect to: {addr}"))?;
 
     let stream: Box<dyn Stream> = match protocol {
-        Protocol::HTTPS => {
+        Protocol::Https => {
             let domain = ServerName::try_from(host)?;
             let connector = TlsConnector::from(tls_config());
             let tls_stream = connector.connect(domain, tcp_stream).await?;
             Box::new(tls_stream)
         }
-        Protocol::HTTP => Box::new(tcp_stream),
+        Protocol::Http => Box::new(tcp_stream),
     };
 
     let io = TokioIo::new(stream);

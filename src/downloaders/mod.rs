@@ -45,16 +45,15 @@ pub trait Downloader: Sync + Send + ParserTask {
 
 impl dyn Downloader {
     pub async fn start_parser_task(self: Arc<Self>, tx: Sender<Msg>, gallery: Arc<Uri>) {
-        match self.try_start_parser_task(tx.clone(), gallery).await {
-            Err(e) => tx.send(Msg::Error(e)).await.expect("failed to send"),
-            Ok(()) => return,
+        if let Err(e) = self.try_start_parser_task(tx.clone(), gallery).await {
+            tx.send(Msg::Error(e)).await.expect("failed to send");
         }
     }
 }
 
 static DOWNLOADERS: OnceLock<Box<[Arc<dyn Downloader>]>> = OnceLock::new();
 #[inline]
-pub fn downloaders() -> &'static Box<[Arc<dyn Downloader>]> {
+pub fn downloaders() -> &'static [Arc<dyn Downloader>] {
     DOWNLOADERS.get_or_init(|| {
         Box::new([
             Arc::new(Imhentai::new()),

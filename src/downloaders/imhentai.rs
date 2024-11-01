@@ -96,7 +96,7 @@ impl CommonUrlPatternDownloader for Imhentai {
             .with_context(|| format!("no {attr:?} attribute"))?
             .with_context(|| format!("empty {attr:?} attribute"))?;
 
-        Ok(Uri::try_from(url.as_bytes()).context("failed to create uri")?)
+        Uri::try_from(url.as_bytes()).context("failed to create uri")
     }
 
     async fn get_image_pattern_from_first_image_page(&self, first_image_url: &Uri) -> Result<Uri> {

@@ -31,7 +31,7 @@ async fn main() -> Result<()> {
     let url = args.url.as_ref();
 
     for extractor in downloaders().iter() {
-        if !extractor.is_gallery_match(&url) {
+        if !extractor.is_gallery_match(url) {
             continue;
         }
 
@@ -95,7 +95,7 @@ async fn start_download(downloader: Arc<dyn Downloader>, args: &Args) -> Result<
 
                     let tx = progress_tx.clone();
                     let downloader = Arc::clone(&downloader);
-                    let out_dir = Arc::clone(&out_dir);
+                    let out_dir = Arc::clone(out_dir);
 
                     set.spawn(async move {
                         download_image(downloader, out_dir, tx, id, &img).await?;
@@ -138,14 +138,14 @@ async fn download_image(
         status: Status::ResolvingUrl,
     }))
     .await?;
-    let url = &downloader.resolve_image_url(&url).await?;
+    let url = &downloader.resolve_image_url(url).await?;
 
     let out_dir = out_dir.as_ref();
     let path = PathBuf::from(url.path());
 
     let file_name = path.file_name().context("missing file name")?;
     // TODO: use image number as file name
-    let file_path = out_dir.join(&file_name);
+    let file_path = out_dir.join(file_name);
 
     tx.send(Msg::Update(Update {
         id,

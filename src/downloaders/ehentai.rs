@@ -73,7 +73,7 @@ impl Ehentai {
         Uri::try_from(href.as_bytes()).ok()
     }
 
-    fn get_title<'a, 'b>(&self, html: &TagWithParser<'a, 'b>) -> Result<String> {
+    fn get_title(&self, html: &TagWithParser<'_, '_>) -> Result<String> {
         let name = html
             .query_selector_mutliple(self.title_selector.iter())?
             .tag

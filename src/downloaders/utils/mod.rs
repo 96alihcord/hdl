@@ -12,11 +12,7 @@ pub fn is_proper_authority<S: AsRef<str>>(uri: &hyper::Uri, authority: S) -> boo
 
 #[inline]
 pub fn is_supported_scheme(uri: &hyper::Uri) -> bool {
-    match uri.scheme_str() {
-        Some("http") => true,
-        Some("https") => true,
-        _ => false,
-    }
+    matches!(uri.scheme_str(), Some("http") | Some("https"))
 }
 
 #[inline]
