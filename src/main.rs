@@ -52,6 +52,8 @@ async fn start_download(downloader: Arc<dyn Downloader>, args: &Args) -> Result<
     let mut set = JoinSet::<Result<()>>::new();
 
     let name = downloader.name();
+
+    // TODO: use real thread
     let progress: JoinHandle<Result<()>> = tokio::spawn(async move {
         progress_bar(progress_rx, name).await?;
         Ok(())
@@ -98,7 +100,12 @@ async fn start_download(downloader: Arc<dyn Downloader>, args: &Args) -> Result<
                     let out_dir = Arc::clone(out_dir);
 
                     set.spawn(async move {
-                        download_image(downloader, out_dir, tx, id, &img).await?;
+                        let img = &img;
+                        download_image(downloader, out_dir, tx, id, img)
+                            .await
+                            .with_context(|| {
+                                format!("failed to download {img:?} (task-id={id})")
+                            })?;
                         drop(permit);
                         Ok(())
                     });
@@ -113,8 +120,9 @@ async fn start_download(downloader: Arc<dyn Downloader>, args: &Args) -> Result<
     }
 
     while let Some(res) = set.join_next().await {
-        res.context("failed to join async task")?
-            .context("async task failed")?;
+        if let Err(e) = res.context("failed to join async task")? {
+            eprintln!("async task failed: {e}");
+        }
     }
 
     parser_task.await?;
