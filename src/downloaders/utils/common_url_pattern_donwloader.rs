@@ -38,7 +38,7 @@ impl DownloadCtx {
     }
 }
 
-pub struct GalleryInfo {
+pub(crate) struct GalleryInfo {
     pub pages_count: usize,
     pub title: String,
 }

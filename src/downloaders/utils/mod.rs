@@ -4,19 +4,19 @@ use tl::{queryselector::QuerySelectorIterator, HTMLTag, Parser, VDom};
 pub(crate) mod common_url_pattern_donwloader;
 
 #[inline]
-pub fn is_proper_authority<S: AsRef<str>>(uri: &hyper::Uri, authority: S) -> bool {
+pub(crate) fn is_proper_authority<S: AsRef<str>>(uri: &hyper::Uri, authority: S) -> bool {
     uri.authority()
         .map(|a| a.as_str() == authority.as_ref())
         .unwrap_or(false)
 }
 
 #[inline]
-pub fn is_supported_scheme(uri: &hyper::Uri) -> bool {
+pub(crate) fn is_supported_scheme(uri: &hyper::Uri) -> bool {
     matches!(uri.scheme_str(), Some("http") | Some("https"))
 }
 
 #[inline]
-pub fn merge_uris(main: &hyper::Uri, fallback: &hyper::Uri) -> hyper::Uri {
+pub(crate) fn merge_uris(main: &hyper::Uri, fallback: &hyper::Uri) -> hyper::Uri {
     use hyper::http::uri::Parts;
 
     let mut parts = Parts::default();
@@ -31,7 +31,7 @@ pub fn merge_uris(main: &hyper::Uri, fallback: &hyper::Uri) -> hyper::Uri {
 }
 
 #[async_trait::async_trait]
-pub trait CollectResponse {
+pub(crate) trait CollectResponse {
     async fn collect_response(self) -> Result<Vec<u8>>;
 }
 
@@ -51,13 +51,16 @@ impl CollectResponse for hyper::Response<hyper::body::Incoming> {
     }
 }
 
-pub struct TagWithParser<'a, 'b> {
+pub(crate) struct TagWithParser<'a, 'b> {
     pub tag: &'b HTMLTag<'a>,
     pub parser: &'b Parser<'a>,
 }
 
 impl<'a, 'b> TagWithParser<'a, 'b> {
-    pub fn query_selector_mutliple<S, I>(&self, selectors: I) -> Result<TagWithParser<'a, 'b>>
+    pub(crate) fn query_selector_mutliple<S, I>(
+        &self,
+        selectors: I,
+    ) -> Result<TagWithParser<'a, 'b>>
     where
         S: AsRef<str> + 'b,
         I: Iterator<Item = S>,
@@ -69,7 +72,7 @@ impl<'a, 'b> TagWithParser<'a, 'b> {
     }
 
     // TODO: accept also closure to transform QuerySelectorIterator into HTMLTag
-    pub fn query_selector(
+    pub(crate) fn query_selector(
         &self,
         selector: &'b str,
     ) -> Option<QuerySelectorIterator<'a, 'b, HTMLTag<'a>>> {
@@ -77,7 +80,7 @@ impl<'a, 'b> TagWithParser<'a, 'b> {
     }
 }
 
-pub trait GetHtmlTag<'a> {
+pub(crate) trait GetHtmlTag<'a> {
     /// get <html> tag
     fn get_html_tag<'b>(&'b self) -> Result<TagWithParser<'a, 'b>>;
 }
@@ -96,7 +99,7 @@ impl<'a> GetHtmlTag<'a> for VDom<'a> {
     }
 }
 
-pub trait QuerySelectorMutliple<'a> {
+pub(crate) trait QuerySelectorMutliple<'a> {
     fn query_selector_mutliple<'b, S, I>(
         &'b self,
         parser: &'b Parser<'a>,

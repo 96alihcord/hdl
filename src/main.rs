@@ -1,28 +1,28 @@
+mod args;
+mod config;
+mod downloaders;
+mod progress;
+mod request;
+
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::thread;
 
+use anyhow::anyhow;
 use clap::Parser;
 use http_body_util::BodyExt;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::{mpsc, Semaphore};
-use tokio::task::{JoinHandle, JoinSet};
+use tokio::task::JoinSet;
 
 use anyhow::{bail, Context, Result};
 
-mod downloaders;
-use downloaders::{downloaders, Downloader};
-mod request;
-use request::request;
-
-mod progress;
-use progress::progress_bar;
-
-mod args;
 use args::Args;
-
-const MAX_FILE_NAME_LEN: usize = 255;
+use downloaders::{downloaders, Downloader};
+use progress::progress_bar;
+use request::request;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -47,15 +47,14 @@ async fn start_download(downloader: Arc<dyn Downloader>, args: &Args) -> Result<
 
     let (parser_tx, mut parser_rx) = mpsc::channel::<downloaders::Msg>(BUFF_SZ);
 
-    let (progress_tx, progress_rx) = mpsc::channel::<progress::Msg>(BUFF_SZ);
+    let (progress_tx, progress_rx) = std::sync::mpsc::channel::<progress::Msg>();
 
     let mut set = JoinSet::<Result<()>>::new();
 
     let name = downloader.name();
 
-    // TODO: use real thread
-    let progress: JoinHandle<Result<()>> = tokio::spawn(async move {
-        progress_bar(progress_rx, name).await?;
+    let progress: thread::JoinHandle<Result<_>> = thread::spawn(|| {
+        progress_bar(progress_rx, name)?;
         Ok(())
     });
 
@@ -78,7 +77,7 @@ async fn start_download(downloader: Arc<dyn Downloader>, args: &Args) -> Result<
                 let title = title
                     .replace('/', "_")
                     .chars()
-                    .take(MAX_FILE_NAME_LEN)
+                    .take(config::MAX_FILE_NAME_LEN)
                     .collect::<String>();
                 let dir = args.out_dir.as_ref().join(title);
                 fs::create_dir_all(&dir).await?;
@@ -86,7 +85,7 @@ async fn start_download(downloader: Arc<dyn Downloader>, args: &Args) -> Result<
             }
             Msg::Images(urls) => {
                 let len = urls.len().try_into()?;
-                progress_tx.send(progress::Msg::IncLen(len)).await?;
+                progress_tx.send(progress::Msg::IncLen(len))?;
 
                 let out_dir = manga_dir
                     .as_ref()
@@ -126,16 +125,21 @@ async fn start_download(downloader: Arc<dyn Downloader>, args: &Args) -> Result<
     }
 
     parser_task.await?;
-    progress_tx.send(progress::Msg::Quit).await?;
-    progress.await??;
+    progress_tx.send(progress::Msg::Quit)?;
+    progress
+        .join()
+        .map_err(|e| anyhow!("progress-bar thread panicked: {:?}", e))
+        .context("failed to join the spawned progress-bar thread")?
+        .context("progress-bar thread returned an error")?;
 
     Ok(())
 }
 
+// TODO: restart download several times if it fails
 async fn download_image(
     downloader: Arc<dyn Downloader>,
     out_dir: Arc<Path>,
-    tx: mpsc::Sender<progress::Msg>,
+    tx: std::sync::mpsc::Sender<progress::Msg>,
     id: usize,
     url: &hyper::Uri,
 ) -> Result<()> {
@@ -144,8 +148,7 @@ async fn download_image(
     tx.send(Msg::Update(Update {
         id,
         status: Status::ResolvingUrl,
-    }))
-    .await?;
+    }))?;
     let url = &downloader.resolve_image_url(url).await?;
 
     let out_dir = out_dir.as_ref();
@@ -158,8 +161,7 @@ async fn download_image(
     tx.send(Msg::Update(Update {
         id,
         status: Status::Starting(file_name.to_owned()),
-    }))
-    .await?;
+    }))?;
 
     let mut response = request(url).await?;
 
@@ -175,8 +177,7 @@ async fn download_image(
                 tx.send(Msg::Update(Update {
                     id,
                     status: Status::Downloading,
-                }))
-                .await?;
+                }))?;
             }
             file.write_all(chunck).await?;
         }
@@ -185,8 +186,7 @@ async fn download_image(
     tx.send(Msg::Update(Update {
         id,
         status: Status::Done,
-    }))
-    .await?;
+    }))?;
 
     Ok(())
 }

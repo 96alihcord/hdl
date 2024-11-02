@@ -16,7 +16,7 @@ use ehentai::Ehentai;
 mod nhentai;
 use nhentai::Nhentai;
 
-pub mod utils;
+mod utils;
 
 pub enum Msg {
     Title(String),

@@ -40,7 +40,7 @@ fn tls_config() -> Arc<rustls::ClientConfig> {
         .clone()
 }
 
-pub async fn request(url: &hyper::Uri) -> Result<Response<hyper::body::Incoming>> {
+pub(crate) async fn request(url: &hyper::Uri) -> Result<Response<hyper::body::Incoming>> {
     enum Protocol {
         Http,
         Https,
