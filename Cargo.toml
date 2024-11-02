@@ -20,7 +20,7 @@ hyper = { version = "1.5", features = ["client", "http1"] }
 hyper-util = {version = "0.1", features = ["tokio"]}
 
 # html parsing
-tl = { version = "0.7", features = ["simd"] }
+tl = { version = "0.7" }
 regex = {version = "1", default-features = false, features = ["std", "perf", "perf-dfa-full", "unicode-perl"]}
 
 # progress bar
