@@ -26,6 +26,6 @@ regex = {version = "1", default-features = false, features = ["std", "perf", "pe
 # progress bar
 indicatif = { version = "0.17", default-features = false }
 
-tokio = { version = "1.40", features = ["macros", "rt-multi-thread", "net", "io-util", "fs", "sync"] }
+tokio = { version = "1.40", features = ["macros", "rt-multi-thread", "net", "io-util", "fs", "sync", "time"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 webpki-roots = "0.26"

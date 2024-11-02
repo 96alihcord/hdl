@@ -100,13 +100,34 @@ async fn start_download(downloader: Arc<dyn Downloader>, args: &Args) -> Result<
 
                     set.spawn(async move {
                         let img = &img;
-                        download_image(downloader, out_dir, tx, id, img)
-                            .await
-                            .with_context(|| {
-                                format!("failed to download {img:?} (task-id={id})")
-                            })?;
+                        let mut done = false;
+                        // TODO: do this properly
+                        for _ in 0..config::DOWNLOAD_RETRIES {
+                            let tx = tx.clone();
+                            let out_dir = Arc::clone(&out_dir);
+                            let downloader = Arc::clone(&downloader);
+
+                            let timeout =
+                                tokio::time::timeout(config::REQUEST_READ_TIMEOUT, async move {
+                                    download_image(downloader, out_dir, tx, id, img)
+                                        .await
+                                        .with_context(|| {
+                                            format!("failed to download {img:?} (task-id={id})")
+                                        })
+                                })
+                                .await;
+                            if let Ok(res) = timeout {
+                                res?;
+                                done = true;
+                                break;
+                            }
+                        }
                         drop(permit);
-                        Ok(())
+                        if done {
+                            Ok(())
+                        } else {
+                            bail!("download failed after {} retries", config::DOWNLOAD_RETRIES)
+                        }
                     });
 
                     id += 1;
@@ -135,7 +156,6 @@ async fn start_download(downloader: Arc<dyn Downloader>, args: &Args) -> Result<
     Ok(())
 }
 
-// TODO: restart download several times if it fails
 async fn download_image(
     downloader: Arc<dyn Downloader>,
     out_dir: Arc<Path>,
